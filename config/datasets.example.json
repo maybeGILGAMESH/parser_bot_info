@@ -1,0 +1,110 @@
+{
+  "timezone": "Europe/Moscow",
+  "schedule": {
+    "hour": 12,
+    "minute": 0
+  },
+  "browser": {
+    "headless": true
+  },
+  "credentials": {
+    "username": "PUT_USERNAME_HERE",
+    "password": "PUT_PASSWORD_HERE",
+    "email": "PUT_EMAIL_HERE"
+  },
+  "datasets": [
+    {
+      "name": "moscow_monthly_temperature",
+      "database_section": "Месяц",
+      "source_name": "Температура воздуха",
+      "stations": [
+        "27612"
+      ],
+      "year_from": 2020,
+      "year_to": 2022,
+      "month_from": null,
+      "month_to": null,
+      "day_from": null,
+      "day_to": null,
+      "output_mode": "single_file",
+      "months": [],
+      "query_parameters": [],
+      "result_fields": [
+        "Индекс ВМО",
+        "Год"
+      ],
+      "output_dir": "downloads/temperature"
+    },
+    {
+      "name": "moscow_monthly_humidity",
+      "database_section": "Месяц",
+      "source_name": "Относительная влажность воздуха",
+      "stations": [
+        "27612"
+      ],
+      "year_from": 2020,
+      "year_to": 2022,
+      "month_from": null,
+      "month_to": null,
+      "day_from": null,
+      "day_to": null,
+      "output_mode": "single_file",
+      "months": [],
+      "query_parameters": [],
+      "result_fields": [
+        "Индекс ВМО",
+        "Год"
+      ],
+      "output_dir": "downloads/humidity"
+    },
+    {
+      "name": "moscow_monthly_precipitation",
+      "database_section": "Месяц",
+      "source_name": "Атмосферные осадки",
+      "stations": [
+        "27612"
+      ],
+      "year_from": 2020,
+      "year_to": 2022,
+      "month_from": null,
+      "month_to": null,
+      "day_from": null,
+      "day_to": null,
+      "output_mode": "single_file",
+      "months": [],
+      "query_parameters": [],
+      "result_fields": [
+        "Индекс ВМО",
+        "Год"
+      ],
+      "output_dir": "downloads/precipitation"
+    },
+    {
+      "name": "moscow_daily_precipitation",
+      "database_section": "Сутки",
+      "source_name": "TTTR - Температура и осадки",
+      "stations": [
+        "27612"
+      ],
+      "year_from": 2024,
+      "year_to": 2024,
+      "month_from": 1,
+      "month_to": 1,
+      "day_from": 1,
+      "day_to": 3,
+      "output_mode": "single_file",
+      "months": [],
+      "query_parameters": [
+        "Количество осадков"
+      ],
+      "result_fields": [
+        "Индекс ВМО",
+        "Год",
+        "Месяц",
+        "День",
+        "Количество осадков"
+      ],
+      "output_dir": "downloads/daily_precipitation"
+    }
+  ]
+}

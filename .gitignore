@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.nox/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Streamlit
+.streamlit/
+
+# Local secrets and runtime config
+config/datasets.json
+.env
+.env.*
+
+# Local databases and generated data
+data/observations.sqlite3
+data/raw/
+data/stations/*.json
+
+# Local downloads and temporary artifacts
+downloads/
+tmp/
+*.log
+*.tmp
+
+# Archives and extracted payloads
+*.zip
+*.sqlite
+*.sqlite3
