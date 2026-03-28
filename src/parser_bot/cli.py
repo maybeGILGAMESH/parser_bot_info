@@ -139,7 +139,30 @@ def _parse_zip(zip_path: str, limit: int) -> None:
 
 def _refresh_station(config: AppConfig, project_root: Path, args) -> None:
     service = AisoriDataService(config=config, project_root=project_root)
+    precheck_failures = service.probe_station_availability(args.station, args.datasets)
+    station_code, station_name = service.describe_station_query(args.station)
     for dataset_key in args.datasets:
+        if dataset_key in precheck_failures:
+            template = DATASET_TEMPLATES[dataset_key]
+            message = precheck_failures[dataset_key]
+            service.log_precheck_failure(dataset_key, args.station, message)
+            print(
+                json.dumps(
+                    {
+                        "dataset_key": template.key,
+                        "dataset_title": template.title,
+                        "station_code": station_code,
+                        "station_name": station_name,
+                        "record_count": 0,
+                        "zip_path": "",
+                        "status": "error",
+                        "message": message,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            continue
         result = service.refresh_dataset(
             dataset_key=dataset_key,
             station_query=args.station,

@@ -10,6 +10,7 @@ from .browser_client import AisoriBrowserClient
 from .catalog import MONTH_FIELD_ORDER, build_dataset_config, get_dataset_template
 from .config import AppConfig
 from .parse_result import ParsedArchive, parse_result_zip
+from .station_catalog import StationCatalogEntry, load_station_catalog
 from .storage import ObservationRecord, ObservationStore
 
 
@@ -33,6 +34,8 @@ class AisoriDataService:
         self.project_root = project_root
         self.raw_root = project_root / "data" / "raw"
         self.store = ObservationStore(project_root / "data" / "observations.sqlite3")
+        self.station_catalog_path = project_root / "data" / "stations" / "monthly_temperature_station_catalog.json"
+        self._station_catalog_by_code = self._load_station_catalog_by_code()
 
     def refresh_dataset(
         self,
@@ -58,10 +61,12 @@ class AisoriDataService:
             )
 
         try:
+            search_query = self.resolve_station_search_query(station_query)
+            error_station_code, error_station_name = self.describe_station_query(station_query)
             raw_output_dir = self.raw_root / dataset_key / _sanitize_station_query(station_query)
             dataset = build_dataset_config(
                 template=template,
-                station_query=station_query,
+                station_query=search_query,
                 raw_output_dir=raw_output_dir,
                 year_from=year_from,
                 year_to=year_to,
@@ -78,6 +83,15 @@ class AisoriDataService:
             )
             parsed = parse_result_zip(download_result.file_path)
             observations = normalize_archive(template, parsed, started_at)
+            observations = _filter_observations_by_requested_range(
+                observations,
+                year_from=year_from,
+                year_to=year_to,
+                month_from=month_from,
+                month_to=month_to,
+                day_from=day_from,
+                day_to=day_to,
+            )
             record_count = self.store.upsert_observations(observations)
             station_code = observations[0].station_code if observations else station_query.strip()
             station_name = observations[0].station_name if observations else station_query.strip()
@@ -96,8 +110,8 @@ class AisoriDataService:
             )
         except Exception as exc:
             finished_at = _utc_now()
-            station_code = station_query.strip()
-            station_name = station_query.strip()
+            station_code = error_station_code
+            station_name = error_station_name
             result = RefreshResult(
                 dataset_key=template.key,
                 dataset_title=template.title,
@@ -221,6 +235,75 @@ class AisoriDataService:
 
     def fetch_latest_refreshes(self, station_code: str) -> list[dict]:
         return self.store.fetch_latest_refreshes(station_code.strip())
+
+    def probe_station_availability(self, station_query: str, dataset_keys: list[str]) -> dict[str, str]:
+        search_query = self.resolve_station_search_query(station_query)
+        source_requirements: dict[str, list[tuple[str, str]]] = {
+            dataset_key: _dataset_source_requirements(dataset_key)
+            for dataset_key in dataset_keys
+        }
+        unique_sources = [source for sources in source_requirements.values() for source in sources]
+        unique_sources = list(dict.fromkeys(unique_sources))
+        if not unique_sources:
+            return {}
+
+        browser_client = AisoriBrowserClient(browser_config=self.config.browser)
+        availability_map = browser_client.probe_station_availability(
+            credentials=self.config.credentials,
+            source_requests=unique_sources,
+            station_query=search_query,
+        )
+
+        failures: dict[str, str] = {}
+        for dataset_key, required_sources in source_requirements.items():
+            missing_sources = [source for source in required_sources if not availability_map.get(source, False)]
+            if missing_sources:
+                failures[dataset_key] = _format_station_unavailable_message(
+                    station_query,
+                    missing_sources,
+                    self._station_catalog_by_code.get(station_query.strip()) if station_query.strip().isdigit() else None,
+                )
+        return failures
+
+    def log_precheck_failure(self, dataset_key: str, station_query: str, message: str) -> None:
+        template = get_dataset_template(dataset_key)
+        timestamp = _utc_now()
+        station_code, station_name = self.describe_station_query(station_query)
+        self.store.log_refresh(
+            dataset_key=template.key,
+            station_code=station_code,
+            station_name=station_name,
+            status="error",
+            message=message,
+            zip_path="",
+            record_count=0,
+            started_at=timestamp,
+            finished_at=timestamp,
+        )
+
+    def resolve_station_search_query(self, station_query: str) -> str:
+        query = station_query.strip()
+        if not query.isdigit():
+            return query
+        entry = self._station_catalog_by_code.get(query)
+        if entry is None:
+            return query
+        return f"{entry.wmo_index} {entry.station_name}"
+
+    def describe_station_query(self, station_query: str) -> tuple[str, str]:
+        query = station_query.strip()
+        if not query.isdigit():
+            return query, query
+        entry = self._station_catalog_by_code.get(query)
+        if entry is None:
+            return query, query
+        return entry.wmo_index, entry.station_name
+
+    def _load_station_catalog_by_code(self) -> dict[str, StationCatalogEntry]:
+        if not self.station_catalog_path.exists():
+            return {}
+        entries = load_station_catalog(self.station_catalog_path)
+        return {entry.wmo_index: entry for entry in entries}
 
 
 def normalize_archive(
@@ -365,9 +448,61 @@ def _within_year_range(year: int, year_from: int | None, year_to: int | None) ->
     return True
 
 
+def _filter_observations_by_requested_range(
+    observations: list[ObservationRecord],
+    year_from: int | None,
+    year_to: int | None,
+    month_from: int | None,
+    month_to: int | None,
+    day_from: int | None,
+    day_to: int | None,
+) -> list[ObservationRecord]:
+    if not observations:
+        return observations
+    if any(record.day is None for record in observations):
+        return observations
+    if None in (year_from, year_to, month_from, month_to, day_from, day_to):
+        return observations
+
+    start_date = date(year_from, month_from, day_from)
+    end_date = date(year_to, month_to, day_to)
+    return [
+        record
+        for record in observations
+        if start_date <= date.fromisoformat(record.observation_date) <= end_date
+    ]
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def _sanitize_station_query(station_query: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in station_query.strip()) or "station"
+
+
+def _dataset_source_requirements(dataset_key: str) -> list[tuple[str, str]]:
+    if dataset_key == "monthly_vapor_pressure_deficit":
+        return _dataset_source_requirements("monthly_temperature") + _dataset_source_requirements("monthly_vapor_pressure")
+    template = get_dataset_template(dataset_key)
+    if template.source_name == "DERIVED":
+        return []
+    return [(template.database_section, template.source_name)]
+
+
+def _format_station_unavailable_message(
+    station_query: str,
+    missing_sources: list[tuple[str, str]],
+    station_entry: StationCatalogEntry | None = None,
+) -> str:
+    source_list = "; ".join(f"{database_section} -> {source_name}" for database_section, source_name in missing_sources)
+    if station_query.strip().isdigit():
+        station_suffix = f" ({station_entry.station_name})" if station_entry is not None else ""
+        return (
+            f"Станция с индексом '{station_query}'{station_suffix} не найдена в списках AISORI для источников: {source_list}. "
+            "Она есть в локальном справочнике ВМО, но в текущих списках AISORI для этих источников не отображается."
+        )
+    return (
+        f"Станция '{station_query}' не найдена в списках AISORI для источников: {source_list}. "
+        "Проверьте индекс, название или доступность станции в выбранном источнике."
+    )

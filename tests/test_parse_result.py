@@ -34,6 +34,30 @@ class ParseResultZipTestCase(unittest.TestCase):
             ],
         )
 
+    def test_parse_result_zip_with_missing_trailing_months(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            zip_path = Path(tmp_dir) / "sample_missing_tail.zip"
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                archive.writestr(
+                    "fld1.txt",
+                    (
+                        " 1  1       5  Индекс ВМО\r\n"
+                        " 2  2       4  Год\r\n"
+                        " 3  3     5,1  Январь\r\n"
+                        " 4  4     5,1  Февраль\r\n"
+                        " 5  5     5,1  Март\r\n"
+                    ).encode("cp1251"),
+                )
+                archive.writestr("statlist1.txt", "27612 Москва, ВДНХ\r\n".encode("cp1251"))
+                archive.writestr("wr1.txt", "27612 2025 0.1 -4.8   \r\n".encode("cp1251"))
+
+            parsed = parse_result_zip(zip_path)
+
+        self.assertEqual(len(parsed.records), 1)
+        self.assertEqual(parsed.records[0]["Январь"], 0.1)
+        self.assertEqual(parsed.records[0]["Февраль"], -4.8)
+        self.assertIsNone(parsed.records[0]["Март"])
+
 
 if __name__ == "__main__":
     unittest.main()

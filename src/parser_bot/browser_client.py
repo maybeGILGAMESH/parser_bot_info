@@ -72,6 +72,34 @@ class AisoriBrowserClient:
                 context.close()
                 browser.close()
 
+    def probe_station_availability(
+        self,
+        credentials: Credentials,
+        source_requests: list[tuple[str, str]],
+        station_query: str,
+    ) -> dict[tuple[str, str], bool]:
+        unique_requests = list(dict.fromkeys(source_requests))
+        if not unique_requests:
+            return {}
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=self.browser_config.headless)
+            context = browser.new_context(accept_downloads=False)
+            page = context.new_page()
+            page.set_default_timeout(20_000)
+
+            try:
+                self._login(page, credentials)
+                self._open_select_page(page)
+                result: dict[tuple[str, str], bool] = {}
+                for database_section, source_name in unique_requests:
+                    self._prepare_source_labels(page, database_section, source_name)
+                    result[(database_section, source_name)] = self._station_exists(page, station_query)
+                return result
+            finally:
+                context.close()
+                browser.close()
+
     def _login(self, page: Page, credentials: Credentials) -> None:
         LOGGER.info("Открываю страницу входа AISORI-M")
         page.goto(self.base_url, wait_until="domcontentloaded")
@@ -96,9 +124,13 @@ class AisoriBrowserClient:
             raise BrowserAutomationError(f"Не удалось открыть select.xhtml, текущий URL: {page.url}")
 
     def _prepare_source(self, page: Page, dataset: DatasetConfig) -> None:
-        page.select_option('select[name="form1:razbd"]', label=dataset.database_section)
+        self._prepare_source_labels(page, dataset.database_section, dataset.source_name)
+
+    @staticmethod
+    def _prepare_source_labels(page: Page, database_section: str, source_name: str) -> None:
+        page.select_option('select[name="form1:razbd"]', label=database_section)
         page.wait_for_timeout(1800)
-        page.select_option('select[name="form1:istd"]', label=dataset.source_name)
+        page.select_option('select[name="form1:istd"]', label=source_name)
         page.wait_for_timeout(2200)
 
     def _select_stations(self, page: Page, stations: list[str]) -> None:
@@ -123,6 +155,16 @@ class AisoriBrowserClient:
         missing = [station for station in resolved_stations if station not in selected_text]
         if missing:
             raise BrowserAutomationError(f"Не удалось перенести станции в правый список: {missing}")
+
+    def _station_exists(self, page: Page, station_query: str) -> bool:
+        filter_input = page.locator('input[id="form1:hlist1_filter"]')
+        query = station_query if station_query.isdigit() else station_query.split(" ", 1)[1] if " " in station_query else station_query
+        filter_input.fill(query)
+        page.wait_for_timeout(800)
+        station_match = self._find_station_locator(page, station_query)
+        filter_input.fill("")
+        page.wait_for_timeout(300)
+        return station_match is not None
 
     def _open_query_page(self, page: Page) -> None:
         page.get_by_role("button", name="Дальше").click()
@@ -257,18 +299,28 @@ class AisoriBrowserClient:
 
     @staticmethod
     def _resolve_station_locator(page: Page, station_query: str):
+        station_match = AisoriBrowserClient._find_station_locator(page, station_query)
+        if station_match is not None:
+            return station_match
+        if station_query.isdigit():
+            raise BrowserAutomationError(f"Станция с индексом '{station_query}' не найдена в списке")
+        raise BrowserAutomationError(f"Станция '{station_query}' не найдена в списке")
+
+    @staticmethod
+    def _find_station_locator(page: Page, station_query: str):
         if station_query.isdigit():
             station_options = page.locator("#form1\\:hlist1 li")
-            for index in range(station_options.count()):
+            option_count = station_options.count()
+            for index in range(option_count):
                 option = station_options.nth(index)
                 option_text = option.inner_text().strip()
                 if option_text.startswith(f"{station_query} "):
                     return option_text, option
-            raise BrowserAutomationError(f"Станция с индексом '{station_query}' не найдена в списке")
+            return None
 
-        station_locator = page.locator("li", has_text=station_query).first
+        station_locator = page.locator("#form1\\:hlist1 li", has_text=station_query).first
         if station_locator.count() == 0:
-            raise BrowserAutomationError(f"Станция '{station_query}' не найдена в списке")
+            return None
         return station_locator.inner_text().strip(), station_locator
 
 

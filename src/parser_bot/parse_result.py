@@ -94,14 +94,16 @@ def _parse_station_map(text: str) -> dict[str, str]:
 def _parse_records(text: str, field_names: list[str], stations: dict[str, str]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for raw_line in text.splitlines():
-        line = raw_line.rstrip()
-        if not line:
+        line = raw_line.rstrip("\r\n")
+        if not line.strip():
             continue
         tokens = re.split(r"\s+", line.strip())
-        if len(tokens) != len(field_names):
+        if len(tokens) > len(field_names):
             raise ValueError(
                 f"Количество значений в строке ({len(tokens)}) не совпадает с числом полей ({len(field_names)}): {line}"
             )
+        if len(tokens) < len(field_names):
+            tokens.extend([""] * (len(field_names) - len(tokens)))
 
         record = {
             field_name: _coerce_token(field_name, token)
@@ -123,6 +125,8 @@ def _normalize_field_name(value: str) -> str:
 
 
 def _coerce_token(field_name: str, token: str) -> Any:
+    if token is None:
+        return None
     value = token.strip()
     if value in MISSING_VALUE_TOKENS:
         return None

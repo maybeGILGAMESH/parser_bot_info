@@ -339,8 +339,15 @@ def _run_refresh(
     with st.spinner("Тяну данные из AISORI-M и обновляю локальное хранилище..."):
         results = []
         failures: list[tuple[str, str]] = []
+        precheck_failures = service.probe_station_availability(station_code, selected_datasets)
+        for dataset_key, message in precheck_failures.items():
+            template = DATASET_TEMPLATES[dataset_key]
+            failures.append((template.title, message))
+            service.log_precheck_failure(dataset_key, station_code, message)
         for dataset_key in selected_datasets:
             template = DATASET_TEMPLATES[dataset_key]
+            if dataset_key in precheck_failures:
+                continue
             try:
                 if template.frequency == "monthly":
                     result = service.refresh_dataset(
